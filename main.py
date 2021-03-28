@@ -5,7 +5,7 @@ import argparse
 import json
 
 import torch
-from torchvision import datasets, transforms
+from torchvision import datasets, transforms, models
 
 from src.sampling import iid, non_iid
 from src.models import LR, MLP, CNNMnist
@@ -80,7 +80,7 @@ torch.manual_seed(obj['seed'])
 
 ############################### Loading Dataset ###############################
 if obj['data_source'] == 'MNIST':
-	data_dir = 'data/'
+	data_dir = '../data/'
 	transformation = transforms.Compose([
 		transforms.ToTensor(), 
 		transforms.Normalize((0.1307,), (0.3081,))
@@ -88,7 +88,25 @@ if obj['data_source'] == 'MNIST':
 	train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transformation)
 	test_dataset = datasets.MNIST(data_dir, train=False, download=True, transform=transformation)
 	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
-	
+
+if obj['data_source'] == 'CIFAR10':
+	data_dir = '../data/'
+	train_transform = transforms.Compose([
+		# transforms.RandomCrop(24),
+		# transforms.RandomHorizontalFlip(),
+		transforms.ToTensor(),
+		transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+	])
+	test_transform = transforms.Compose([
+		# transforms.CenterCrop(24),
+		transforms.ToTensor(),
+		transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+	])
+	# train_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform), list(range(200)))
+	# test_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform), list(range(100)))
+	train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
+	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
+	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
 ################################ Sampling Data ################################
 if obj['sampling'] == 'iid':
 	user_groups = iid(train_dataset, obj['num_users'], obj['seed'])
@@ -102,6 +120,13 @@ elif obj['model'] == 'MLP':
 	global_model = MLP(dim_in=28*28, dim_hidden=200, dim_out=10, seed=obj['seed'])
 elif obj['model'] == 'CNN' and obj['data_source'] == 'MNIST':
 	global_model = CNNMnist(obj['seed'])
+elif obj['model'] == 'RESNET18':
+	global_model = models.resnet18(pretrained=False)
+	num_ftrs = global_model.fc.in_features
+	if obj['data_source'] == 'CIFAR10':
+		global_model.fc = torch.nn.Linear(num_ftrs, 10)
+	else:
+		raise ValueError('Data source not implemented for RESNET')
 else:
 	raise ValueError('Check the model and data source provided in the arguments.')
 
@@ -165,7 +190,6 @@ for epoch in range(obj['global_epochs']):
 	
 	np.random.seed(epoch) # Picking a fraction of users to choose for training
 	idxs_users = np.random.choice(range(obj['num_users']), max(int(obj['frac_clients']*obj['num_users']), 1), replace=False)
-	
 	local_updates, local_losses, local_sizes, control_updates = [], [], [], []
 
 	for idx in idxs_users: # Training the local models
@@ -220,7 +244,7 @@ for epoch in range(obj['global_epochs']):
 													local_byz_updates, local_byz_sizes, obj['little_std'], obj['fall_eps'])
 				for i in range(len(local_byz_updates)):
 					for k in byz_update.keys():
-						local_byz_updates[i][k] = torch.normal(m[k], s[k])
+						local_byz_updates[i][k] = torch.normal(m[k], s[k]).to(obj['device'])
 					local_benign_updates.append(copy.deepcopy(local_byz_updates[i]))
 
 			elif obj['attack_type'] == 'label_flip':
@@ -249,7 +273,7 @@ for epoch in range(obj['global_epochs']):
 	local_sizes_new=0
 	total_size=sum(local_sizes)
 	for k in global_weights.keys():
-				local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
+		local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype).to(obj['device'])
 	j=1
 	for i in array_range:
 		
@@ -268,7 +292,7 @@ for epoch in range(obj['global_epochs']):
 			if j<len(local_updates):
 				local_sizes_new=0
 				for k in global_weights.keys():
-					local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
+					local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype).to(obj['device'])
 		else:
 			local_sizes_new+=local_sizes[i]
 			for key in w_copy.keys():
@@ -419,6 +443,7 @@ for epoch in range(obj['global_epochs']):
 			out_arr = pd.DataFrame(np.array([list(range(epoch+1)), test_accuracy, train_loss_updated, test_loss]).T,
 				columns=['epoch', 'test_acc', 'train_loss_updated', 'test_loss'])
 		out_arr.to_csv('results/%s_output.csv'%(obj['exp_name']), index=False)
+		torch.save(global_model, 'results/%s_model.pt'%(obj['exp_name']))
 
 	if test_accuracy[-1] >= obj['threshold_test_metric']:
 		print("Terminating as desired threshold for test metric reached...")

@@ -35,9 +35,9 @@ def global_aggregate(global_optimizer, global_weights, local_updates, local_size
 		for key in w.keys():
 			for i in range(len(local_updates)):
 				if global_optimizer == 'scaffold':
-					w[key] += torch.mul(torch.div(local_updates[i][key], len(local_sizes)), global_lr)
+					w[key] += torch.mul(torch.div(local_updates[i][key], len(local_sizes)), global_lr).type(w[key].dtype)
 				else:
-					w[key] += torch.mul(torch.mul(local_updates[i][key], local_sizes[i]/total_size), global_lr)
+					w[key] += torch.mul(torch.mul(local_updates[i][key], local_sizes[i]/total_size), global_lr).type(w[key].dtype)
 
 		return w, v, m
 	
@@ -137,7 +137,8 @@ def test_inference(global_model, test_dataset, device, test_batch_size=128):
 	"""
 
 	test_loader = DataLoader(test_dataset, batch_size=test_batch_size, shuffle=False)
-	criterion = nn.NLLLoss().to(device)
+	# criterion = nn.NLLLoss().to(device)
+	criterion = nn.CrossEntropyLoss().to(device)
 	global_model.eval()
 
 	loss, total, correct = 0.0, 0.0, 0.0

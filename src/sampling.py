@@ -49,7 +49,8 @@ def non_iid(dataset, num_users, num_shards_user, seed):
 	idx_shard = list(range(num_shards))
 	user_groups = {i: np.array([], dtype='int64') for i in range(num_users)}
 	idxs = np.arange(num_shards * num_images)
-	labels = dataset.targets.numpy()
+	labels = [label for _, label in dataset]
+	labels = np.array(labels)
 	
 	# Sort labels and corresponding indexes
 	idxs_labels = np.vstack((idxs, labels))

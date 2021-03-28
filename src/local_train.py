@@ -31,7 +31,8 @@ class LocalUpdate(object):
 		self.test_batch_size = test_batch_size
 		self.attack = attack
 		self.num_classes = num_classes
-		self.criterion = nn.NLLLoss().to(self.device) # Default criterion set to NLL loss function
+		# self.criterion = nn.NLLLoss().to(self.device) # Default criterion set to NLL loss function
+		self.criterion = nn.CrossEntropyLoss().to(self.device)
 
 		self.train_test(dataset, list(idxs)) # Creating train and test splits
 

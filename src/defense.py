@@ -43,7 +43,7 @@ def defend_updates(local_updates, local_sizes, defense_type, trim_ratio=0.1, mul
 			stacked = torch.stack([i[k] for i in local_updates]) # Stacking along 0th dimension
 			sorted_stack, _ = torch.sort(stacked, dim=0)
 			sorted_stack = sorted_stack[remove: len(local_updates) - remove] # Trimming the top and bottom updates after sorting
-			temp_updates.append((k, [torch.flatten(i, start_dim=0, end_dim=1) for i in list(torch.split(sorted_stack, split_size_or_sections=1, dim=0))]))
+			temp_updates.append((k, [torch.flatten(i, start_dim=0, end_dim=1) if len(i.shape) > 1 else i[0] for i in list(torch.split(sorted_stack, split_size_or_sections=1, dim=0))]))
 
 		# (Input - 2 * remove) updates will be stored
 		for i in range(len(local_updates) - 2*remove):
