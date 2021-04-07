@@ -217,6 +217,7 @@ for epoch in range(obj['global_epochs']):
 		control_updates.append(c_update)
 		local_losses.append(loss)
 		local_sizes.append(local_size)
+		w = None
 		#print(idx, np.unique(np.array([train_dataset.targets.numpy()[i] for i in user_groups[idx]])))
 
 	train_loss_updated.append(sum(local_losses)/len(local_losses)) # Appending global training loss
@@ -237,6 +238,7 @@ for epoch in range(obj['global_epochs']):
 													local_byz_sizes, obj['little_std'], obj['fall_eps'])
 				for i in range(len(local_byz_updates)):
 					local_benign_updates.append(copy.deepcopy(byz_update)) # Setting same update for all byzantine workers
+				byz_update = None
 
 			elif obj['attack_type'] == 'gaussian':
 
@@ -250,11 +252,10 @@ for epoch in range(obj['global_epochs']):
 			elif obj['attack_type'] == 'label_flip':
 				pass # Setting same update for all byzantine workers
 
-				
-
 			else:
 				raise ValueError("Please specify a valid attack_type from ['fall' ,'little', 'gaussian'].")
 
+		local_byz_updates = None
 		if obj['attack_type'] in ['fall','little','gaussian']:
 			local_updates = local_benign_updates
 		elif obj['attack_type'] =='label_flip':
@@ -266,14 +267,13 @@ for epoch in range(obj['global_epochs']):
 	array_range=np.arange(len(local_updates))
 	#np.random.shuffle(array_range)
 	#print(array_range)
-	w_copy=copy.deepcopy(global_weights)
 	local_updates_final=[]
 	local_sizes_final=[]
 	local_updates_group = OrderedDict()
 	local_sizes_new=0
 	total_size=sum(local_sizes)
 	for k in global_weights.keys():
-		local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype).to(obj['device'])
+		local_updates_group[k] = torch.zeros_like(global_weights[k])
 	j=1
 	for i in array_range:
 		
@@ -281,8 +281,8 @@ for epoch in range(obj['global_epochs']):
 		if j%m_user==0:
 			#print(j)
 			local_sizes_new+=local_sizes[i]
-			for key in w_copy.keys():
-				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i])
+			for key in global_weights.keys():
+				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i]).type(local_updates_group[key].dtype)
 				local_updates_group[key]=local_updates_group[key]/local_sizes_new
 
 			#local_updates_group=local_updates_group/m_user
@@ -292,12 +292,13 @@ for epoch in range(obj['global_epochs']):
 			if j<len(local_updates):
 				local_sizes_new=0
 				for k in global_weights.keys():
-					local_updates_group[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype).to(obj['device'])
+					local_updates_group[k] = torch.zeros_like(global_weights[k])
 		else:
 			local_sizes_new+=local_sizes[i]
-			for key in w_copy.keys():
-				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i])
+			for key in global_weights.keys():
+				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i]).type(local_updates_group[key].dtype)
 		j+=1
+	local_updates_group = None
 	#print(len(local_updates_final))
 	#print(local_sizes_final)
 	#torch.mul(local_updates[i][key], local_sizes[i]/total_size
@@ -305,7 +306,7 @@ for epoch in range(obj['global_epochs']):
 	#################################### Defense BEFORE Aggregation ####################################
 
 	if obj['is_defense'] == 1:
-
+		local_updates = None
 		local_updates, local_sizes = defend_updates(local_updates_final, local_sizes_final, obj['defense_type'], obj['trim_ratio'], obj['multi_krum'])
 
 	################################# Aggregation of the local weights #################################
@@ -391,6 +392,7 @@ for epoch in range(obj['global_epochs']):
 			local_sizes = [i for idx, i in enumerate(local_sizes) if idx in [j[0] for j in less]]
 
 	global_model.load_state_dict(gw)
+	gw = None
 
 	if len(local_updates) != 0:	# Take a global step only if there exists atleast one local update
 		global_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, local_updates, 

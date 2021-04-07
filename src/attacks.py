@@ -35,11 +35,11 @@ def attack_updates(global_weights, defense_type, attack_type,
 
 		w_byzantine = OrderedDict()
 		for k in global_weights.keys():
-			w_byzantine[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
+			w_byzantine[k] = torch.zeros_like(global_weights[k])
 		
 		for k in w_byzantine.keys():
 			for i in range(len(local_byz_updates)):
-					w_byzantine[k] += torch.mul(local_byz_updates[i][k], float(local_byz_sizes[i]/sum(local_byz_sizes)))
+				w_byzantine[k] += torch.mul(local_byz_updates[i][k], float(local_byz_sizes[i]/sum(local_byz_sizes))).type(w_byzantine[k].dtype)
 			w_byzantine[k] = fall_eps * w_byzantine[k]
 
 	elif attack_type in ['gaussian', 'little']:
@@ -49,9 +49,9 @@ def attack_updates(global_weights, defense_type, attack_type,
 		s = OrderedDict()
 
 		for k in global_weights.keys():
-			w_byzantine[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
-			m[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
-			s[k] = torch.zeros(global_weights[k].shape, dtype=global_weights[k].dtype)
+			w_byzantine[k] = torch.zeros_like(global_weights[k])
+			m[k] = torch.zeros_like(global_weights[k])
+			s[k] = torch.zeros_like(global_weights[k])
 
 		for k in global_weights.keys():
 			for i in range(len(local_byz_updates)):
