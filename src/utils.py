@@ -2,6 +2,7 @@ import copy
 import math
 from collections import OrderedDict
 
+import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
@@ -158,3 +159,38 @@ def test_inference(global_model, test_dataset, device, test_batch_size=128):
 		total += len(labels)
 	
 	return correct/total, loss/total
+
+def balanced_train_test_split(indices, labels, test_size, seed):
+	"""
+	Splits a dataset into train/test where the test set has the same number of samples with each label
+
+	Args:
+		indices (list): List of indices
+		labels (list): List of labels corresponding to the indices
+		test_size (float): fraction of dataset to partition into the test set
+		seed (int): seed for random sampling
+	"""
+	n = len(indices)
+	indices, labels = np.array(indices), np.array(labels)
+	rng = np.random.default_rng(seed)
+
+	shuffle = rng.permutation(n)
+	indices = indices[shuffle]
+	labels = labels[shuffle]
+
+	unique_labels = np.unique(labels)
+	num_each = int(n * test_size / len(unique_labels))
+	counts = {i: 0 for i in unique_labels}
+
+	pick = []
+	for i in range(n):
+		if counts[labels[i]] < num_each:
+			pick.append(i)
+			counts[labels[i]] += 1
+	pick = np.array(pick)
+	if sum([1 for c in counts.values() if c < num_each]):
+		print('Unbalanced test set; test_size is too large')
+	# print(np.unique(labels[pick], return_counts=True))
+	train_set = np.delete(indices, pick)
+	test_set = indices[pick]
+	return train_set, test_set

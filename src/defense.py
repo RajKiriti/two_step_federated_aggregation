@@ -1,18 +1,38 @@
 import torch
 import numpy as np
 import copy
+import math
 
 from collections import OrderedDict
 
-def defend_updates(local_updates, local_sizes, defense_type, trim_ratio=0.1, multi_krum=2):
+def defend_updates(global_model,
+				  local_updates,
+				  local_sizes,
+				  device,
+				  local_lr,
+				  defense_type,
+				  trim_ratio=0.1,
+				  multi_krum=2,
+				  zeno_val_dataset=None,
+				  zeno_batch_size=128,
+				  zeno_rho=0.0001,
+				  zeno_eps=0.1):
 	"""
-	Robust Aggregation on top of the local updates.
+	Robust Aggregation on top of the local updates. This function destroys the original local_updates to save memory.
 
 	Args:
+		global_model (model state) : Copy of the global model
 		local_updates (list) : Updates from all workers
 		local_sizes (list) : Data sizes on all workers
+		device (str) : One from ['cpu', 'cuda']
+		local_lr (float) : Step-size for client training
 		defense_type (str) : Robust Aggregation method to be used
 		trim_ratio (float) : Trim ratio for trimmed mean aggregation
+		multi_krum (float) : Number of clients to pick after krumming
+		zeno_val_dataset (torch.utils.data.Dataset) : Dataset for computing Zeno++ score
+		zeno_batch_size (int): Batch size for calculating gradient for Zeno++ score
+		zeno_rho (float): Rho for Zeno++ score
+		zeno_eps (float): Epsilon for Zeno++ score
 	"""
 	if len(local_updates) <= 0:
 		raise ValueError('No local updates to aggregate.')
@@ -79,6 +99,52 @@ def defend_updates(local_updates, local_sizes, defense_type, trim_ratio=0.1, mul
 		for i in range(multi_krum):
 			updates.append(local_updates[idxs[i]])
 			updates_sizes.append(local_sizes[idxs[i]])
+
+	elif defense_type == 'zeno++':
+		val_loader = torch.utils.data.DataLoader(zeno_val_dataset, batch_size=zeno_batch_size, shuffle=False)
+		images, labels = next(iter(val_loader))
+		images, labels = images.to(device), labels.to(device)
+		criterion = torch.nn.CrossEntropyLoss().to(device)
+
+		global_outputs = global_model(images)
+		global_loss = criterion(global_outputs, labels)
+		global_loss.backward()
+
+		for i, update in enumerate(local_updates):
+			# normalize g
+			param_square = 0.0
+			zeno_param_square = 0.0
+			for k, zeno_param in global_model.named_parameters():
+				param = update[k].detach()
+				if zeno_param.requires_grad:
+					param_square += param.square().sum()
+					zeno_param_square += zeno_param.grad.detach().square().sum()
+			c = -math.sqrt(zeno_param_square / param_square)
+			print('\nc:', c)
+			for k, zeno_param in global_model.named_parameters():
+				if zeno_param.requires_grad:
+					param = update[k]
+					param[:] = param * c
+
+			# compute zeno score
+			zeno_innerprod = 0.0
+			zeno_square = param_square
+			for k, zeno_param in global_model.named_parameters():
+				param = update[k].detach()
+				if zeno_param.requires_grad:
+					zeno_innerprod += torch.sum(param * zeno_param.grad.detach())
+			print('innerprod:', zeno_innerprod)
+			print('terms:', local_lr * zeno_innerprod, zeno_rho * zeno_square, local_lr * zeno_eps)
+			score = local_lr * zeno_innerprod - zeno_rho * zeno_square + local_lr * zeno_eps
+			print('score:', score)
+			if score >= 0.0:
+				# rescale update
+				for k, zeno_param in global_model.named_parameters():
+					if zeno_param.requires_grad:
+						param = update[k]
+						param[:] = -local_lr * param
+				updates.append(update)
+				updates_sizes.append(local_sizes[i])
 
 	else:
 		raise ValueError("Please specify a valid attack_type from ['fall' ,'little', 'gaussian'].")

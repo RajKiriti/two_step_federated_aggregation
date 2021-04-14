@@ -6,10 +6,11 @@ import json
 
 import torch
 from torchvision import datasets, transforms, models
+from sklearn.model_selection import train_test_split
 
 from src.sampling import iid, non_iid
 from src.models import LR, MLP, CNNMnist
-from src.utils import global_aggregate, network_parameters, test_inference
+from src.utils import global_aggregate, network_parameters, test_inference, balanced_train_test_split
 from src.local_train import LocalUpdate
 from src.attacks import attack_updates
 from src.defense import defend_updates
@@ -55,10 +56,15 @@ parser.add_argument('--attack_type', type=str, default='label_flip', help="attac
 parser.add_argument('--fall_eps', type=float, default=-5.0, help="epsilon value to be used for the Fall Attack")
 parser.add_argument('--little_std', type=float, default=1.5, help="standard deviation to be used for the Little Attack")
 parser.add_argument('--is_defense', type=int, default=0, help="whether to defend or not")
-parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean'])
+parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean', 'zeno++'])
 parser.add_argument('--trim_ratio', type=float, default=0.1, help="proportion of updates to trim for trimmed mean")
 parser.add_argument('--multi_krum', type=int, default=5, help="number of clients to pick after krumming")
+parser.add_argument('--zeno_valid_frac', type=float, default=0.05, help="fraction of the training dataset to be used for Zeno++ validation")
+parser.add_argument('--zeno_batch_size', type=int, default=128, help="batch size for calculating gradient for Zeno++ score")
+parser.add_argument('--zeno_rho', type=float, default=0.0001, help="rho for Zeno++ score")
+parser.add_argument('--zeno_eps', type=float, default=0.1, help="epsilon for Zeno++ score")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
+parser.add_argument('--random_aggregation', type=int, default=0, help="whether the small groups should be changed each round")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
 
 parser.add_argument('--batch_print_frequency', type=int, default=100, help="frequency after which batch results need to be printed to the console")
@@ -108,6 +114,16 @@ if obj['data_source'] == 'CIFAR10':
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
 	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
 ################################ Sampling Data ################################
+if obj['is_defense'] and obj['defense_type'] == 'zeno++':
+	labels = train_dataset.targets
+	indices = list(range(len(train_dataset)))
+	train_idx, zeno_val_idx = balanced_train_test_split(indices, labels, obj['zeno_valid_frac'], obj['seed'])
+	zeno_val_dataset = torch.utils.data.Subset(train_dataset, zeno_val_idx)
+	train_dataset = torch.utils.data.Subset(train_dataset, train_idx)
+	print("Train and Zeno++ Validation Sizes - (%d, %d)"%(len(train_dataset), len(zeno_val_dataset)))
+	np.random.seed(obj['seed'])
+else:
+	zeno_val_dataset = None
 if obj['sampling'] == 'iid':
 	user_groups = iid(train_dataset, obj['num_users'], obj['seed'])
 else:
@@ -121,12 +137,10 @@ elif obj['model'] == 'MLP':
 elif obj['model'] == 'CNN' and obj['data_source'] == 'MNIST':
 	global_model = CNNMnist(obj['seed'])
 elif obj['model'] == 'RESNET18':
-	global_model = models.resnet18(pretrained=False)
+	global_model = models.resnet18(pretrained=False, norm_layer=lambda C: torch.nn.GroupNorm(32, C, eps=0.001))
+	# global_model = models.resnet18(pretrained=False)
 	num_ftrs = global_model.fc.in_features
-	if obj['data_source'] == 'CIFAR10':
-		global_model.fc = torch.nn.Linear(num_ftrs, 10)
-	else:
-		raise ValueError('Data source not implemented for RESNET')
+	global_model.fc = torch.nn.Linear(num_ftrs, len(train_dataset.classes))
 else:
 	raise ValueError('Check the model and data source provided in the arguments.')
 
@@ -263,8 +277,10 @@ for epoch in range(obj['global_epochs']):
 	#################################### Aggregation into small CLUSTERS ####################################
 	numb_groups=len(local_updates)/obj['small_group_size']
 	m_user=obj['small_group_size']
-	#print('m_user is',m_user)
+	# print('m_user is',m_user)
 	array_range=np.arange(len(local_updates))
+	if obj['random_aggregation']:
+		np.random.shuffle(array_range)
 	#np.random.shuffle(array_range)
 	#print(array_range)
 	local_updates_final=[]
@@ -307,7 +323,19 @@ for epoch in range(obj['global_epochs']):
 
 	if obj['is_defense'] == 1:
 		local_updates = None
-		local_updates, local_sizes = defend_updates(local_updates_final, local_sizes_final, obj['defense_type'], obj['trim_ratio'], obj['multi_krum'])
+		global_model.train()
+		local_updates, local_sizes = defend_updates(global_model,
+													local_updates_final,
+													local_sizes_final,
+													obj['device'],
+													obj['local_lr'],
+													obj['defense_type'],
+													obj['trim_ratio'],
+													obj['multi_krum'],
+													zeno_val_dataset,
+													obj['zeno_batch_size'],
+													obj['zeno_rho'],
+													obj['zeno_eps'])
 
 	################################# Aggregation of the local weights #################################
 
@@ -445,7 +473,7 @@ for epoch in range(obj['global_epochs']):
 			out_arr = pd.DataFrame(np.array([list(range(epoch+1)), test_accuracy, train_loss_updated, test_loss]).T,
 				columns=['epoch', 'test_acc', 'train_loss_updated', 'test_loss'])
 		out_arr.to_csv('results/%s_output.csv'%(obj['exp_name']), index=False)
-		torch.save(global_model, 'results/%s_model.pt'%(obj['exp_name']))
+		# torch.save(global_model, 'results/%s_model.pt'%(obj['exp_name']))
 
 	if test_accuracy[-1] >= obj['threshold_test_metric']:
 		print("Terminating as desired threshold for test metric reached...")
