@@ -183,9 +183,14 @@ local_lr_counts = [1 for i in range(obj['num_users'])]
 
 num_classes = 10 # MNIST
 
+client_ordering = np.arange(obj['num_users'])
+np.random.shuffle(client_ordering)
+
 # Picking byzantine users (they would remain constant throughout the training procedure)
 if obj['is_attack'] == 1:
 	idxs_byz_users = np.random.choice(range(obj['num_users']), max(int(obj['frac_byz_clients']*obj['num_users']), 1), replace=False)
+	num_groups = obj['num_users']//obj['small_group_size']
+	print('Byzantine clusters (0-indexed):', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
 
 lr_constant = obj['local_lr'] * obj['global_lr']
 
@@ -240,7 +245,7 @@ for epoch in range(obj['global_epochs']):
 
 	if obj['is_attack'] == 1:
 
-		local_benign_updates = [i for idx, i in enumerate(local_updates) if idxs_users[idx] not in idxs_byz_users]
+		local_byz_indices = [idx for idx, i in enumerate(local_updates) if idxs_users[idx] in idxs_byz_users]
 		local_byz_updates = [i for idx, i in enumerate(local_updates) if idxs_users[idx] in idxs_byz_users]
 		local_byz_sizes = [i for idx, i in enumerate(local_sizes) if idxs_users[idx] in idxs_byz_users]
 
@@ -250,18 +255,18 @@ for epoch in range(obj['global_epochs']):
 
 				byz_update, _, _ = attack_updates(global_weights, obj['defense_type'], obj['attack_type'], local_byz_updates, 
 													local_byz_sizes, obj['little_std'], obj['fall_eps'])
-				for i in range(len(local_byz_updates)):
-					local_benign_updates.append(copy.deepcopy(byz_update)) # Setting same update for all byzantine workers
+				for i in local_byz_indices:
+					local_updates[i] = copy.deepcopy(byz_update) # Setting same update for all byzantine workers
 				byz_update = None
 
 			elif obj['attack_type'] == 'gaussian':
 
 				byz_update, m, s = attack_updates(global_weights, obj['defense_type'], obj['attack_type'], 
 													local_byz_updates, local_byz_sizes, obj['little_std'], obj['fall_eps'])
-				for i in range(len(local_byz_updates)):
+				for i, idx in enumerate(local_byz_indices):
 					for k in byz_update.keys():
 						local_byz_updates[i][k] = torch.normal(m[k], s[k]).to(obj['device'])
-					local_benign_updates.append(copy.deepcopy(local_byz_updates[i]))
+					local_updates[idx] = copy.deepcopy(local_byz_updates[i])
 
 			elif obj['attack_type'] == 'label_flip':
 				pass # Setting same update for all byzantine workers
@@ -270,17 +275,16 @@ for epoch in range(obj['global_epochs']):
 				raise ValueError("Please specify a valid attack_type from ['fall' ,'little', 'gaussian'].")
 
 		local_byz_updates = None
-		if obj['attack_type'] in ['fall','little','gaussian']:
-			local_updates = local_benign_updates
-		elif obj['attack_type'] =='label_flip':
-			local_updates=local_updates
 	#################################### Aggregation into small CLUSTERS ####################################
 	numb_groups=len(local_updates)/obj['small_group_size']
 	m_user=obj['small_group_size']
 	# print('m_user is',m_user)
-	array_range=np.arange(len(local_updates))
-	if obj['random_aggregation']:
+	if obj['random_aggregation'] or obj['frac_clients'] < 1:
+		array_range = np.arange(len(local_updates))
 		np.random.shuffle(array_range)
+	else:
+		client_idx_to_update_idx = {idx: i for i, idx in enumerate(idxs_users)} # maps from idx in user_groups to idx in local_updates
+		array_range = [client_idx_to_update_idx[i] for i in client_ordering] # gets idxs in local_updates with order determined by idx in user_groups
 	#np.random.shuffle(array_range)
 	#print(array_range)
 	local_updates_final=[]
