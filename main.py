@@ -15,7 +15,7 @@ from src.local_train import LocalUpdate
 from src.attacks import attack_updates
 from src.defense import defend_updates
 
-from collections import OrderedDict, Counter
+from collections import OrderedDict, Counter, defaultdict
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -56,13 +56,14 @@ parser.add_argument('--attack_type', type=str, default='label_flip', help="attac
 parser.add_argument('--fall_eps', type=float, default=-5.0, help="epsilon value to be used for the Fall Attack")
 parser.add_argument('--little_std', type=float, default=1.5, help="standard deviation to be used for the Little Attack")
 parser.add_argument('--is_defense', type=int, default=0, help="whether to defend or not")
-parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean', 'zeno++'])
+parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean', 'zeno++', 'zeno', 'zeno_trimmed'])
 parser.add_argument('--trim_ratio', type=float, default=0.1, help="proportion of updates to trim for trimmed mean")
 parser.add_argument('--multi_krum', type=int, default=5, help="number of clients to pick after krumming")
 parser.add_argument('--zeno_valid_frac', type=float, default=0.05, help="fraction of the training dataset to be used for Zeno++ validation")
 parser.add_argument('--zeno_batch_size', type=int, default=128, help="batch size for calculating gradient for Zeno++ score")
 parser.add_argument('--zeno_rho', type=float, default=0.0001, help="rho for Zeno++ score")
 parser.add_argument('--zeno_eps', type=float, default=0.1, help="epsilon for Zeno++ score")
+parser.add_argument('--zeno_trim', type=float, default=0.4, help="fraction of clients to trim for Zeno")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
 parser.add_argument('--random_aggregation', type=int, default=0, help="whether the small groups should be changed each round")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
@@ -114,7 +115,7 @@ if obj['data_source'] == 'CIFAR10':
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
 	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
 ################################ Sampling Data ################################
-if obj['is_defense'] and obj['defense_type'] == 'zeno++':
+if obj['is_defense'] and 'zeno' in obj['defense_type']:
 	labels = train_dataset.targets
 	indices = list(range(len(train_dataset)))
 	train_idx, zeno_val_idx = balanced_train_test_split(indices, labels, obj['zeno_valid_frac'], obj['seed'])
@@ -137,10 +138,13 @@ elif obj['model'] == 'MLP':
 elif obj['model'] == 'CNN' and obj['data_source'] == 'MNIST':
 	global_model = CNNMnist(obj['seed'])
 elif obj['model'] == 'RESNET18':
-	global_model = models.resnet18(pretrained=False, norm_layer=lambda C: torch.nn.GroupNorm(32, C, eps=0.001))
-	# global_model = models.resnet18(pretrained=False)
+	global_model = models.resnet18(pretrained=False)
 	num_ftrs = global_model.fc.in_features
-	global_model.fc = torch.nn.Linear(num_ftrs, len(train_dataset.classes))
+	global_model.fc = torch.nn.Linear(num_ftrs, 10)
+elif obj['model'] == 'RESNET18GN':
+	global_model = models.resnet18(pretrained=False, norm_layer=lambda C: torch.nn.GroupNorm(32, C, eps=0.001))
+	num_ftrs = global_model.fc.in_features
+	global_model.fc = torch.nn.Linear(num_ftrs, 10)
 else:
 	raise ValueError('Check the model and data source provided in the arguments.')
 
@@ -150,6 +154,7 @@ global_model.to(obj['device'])
 global_model.train()
 
 global_weights = global_model.state_dict() # Setting the initial global weights
+params_require_grad = defaultdict(bool, {k: v.requires_grad for k, v in global_model.named_parameters()})
 
 ############################ Initializing Placeholder ############################
 
@@ -183,6 +188,7 @@ local_lr_counts = [1 for i in range(obj['num_users'])]
 
 num_classes = 10 # MNIST
 
+np.random.seed(obj['seed'])
 client_ordering = np.arange(obj['num_users'])
 np.random.shuffle(client_ordering)
 
@@ -253,7 +259,7 @@ for epoch in range(obj['global_epochs']):
 
 			if obj['attack_type'] in ['fall', 'little']:
 
-				byz_update, _, _ = attack_updates(global_weights, obj['defense_type'], obj['attack_type'], local_byz_updates, 
+				byz_update, _, _ = attack_updates(global_weights, params_require_grad, obj['defense_type'], obj['attack_type'], local_byz_updates, 
 													local_byz_sizes, obj['little_std'], obj['fall_eps'])
 				for i in local_byz_indices:
 					local_updates[i] = copy.deepcopy(byz_update) # Setting same update for all byzantine workers
@@ -339,7 +345,8 @@ for epoch in range(obj['global_epochs']):
 													zeno_val_dataset,
 													obj['zeno_batch_size'],
 													obj['zeno_rho'],
-													obj['zeno_eps'])
+													obj['zeno_eps'],
+													obj['zeno_trim'])
 
 	################################# Aggregation of the local weights #################################
 

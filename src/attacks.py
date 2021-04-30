@@ -4,7 +4,7 @@ import copy
 
 from collections import OrderedDict
 
-def attack_updates(global_weights, defense_type, attack_type, 
+def attack_updates(global_weights, params_require_grad, defense_type, attack_type, 
 					local_byz_updates, local_byz_sizes, little_std, fall_eps):
 	"""
 	Attacks the benign updates and converts to byzantine.
@@ -38,6 +38,8 @@ def attack_updates(global_weights, defense_type, attack_type,
 			w_byzantine[k] = torch.zeros_like(global_weights[k])
 		
 		for k in w_byzantine.keys():
+			if not params_require_grad[k]:
+				continue
 			for i in range(len(local_byz_updates)):
 				w_byzantine[k] += torch.mul(local_byz_updates[i][k], float(local_byz_sizes[i]/sum(local_byz_sizes))).type(w_byzantine[k].dtype)
 			w_byzantine[k] = fall_eps * w_byzantine[k]
