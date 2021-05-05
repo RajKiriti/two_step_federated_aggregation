@@ -9,7 +9,7 @@ from torchvision import datasets, transforms, models
 from sklearn.model_selection import train_test_split
 
 from src.sampling import iid, non_iid
-from src.models import LR, MLP, CNNMnist
+from src.models import LR, MLP, CNNMnist, CNNCIFAR
 from src.utils import global_aggregate, network_parameters, test_inference, balanced_train_test_split
 from src.local_train import LocalUpdate
 from src.attacks import attack_updates
@@ -64,8 +64,11 @@ parser.add_argument('--zeno_batch_size', type=int, default=128, help="batch size
 parser.add_argument('--zeno_rho', type=float, default=0.0001, help="rho for Zeno++ score")
 parser.add_argument('--zeno_eps', type=float, default=0.1, help="epsilon for Zeno++ score")
 parser.add_argument('--zeno_trim', type=float, default=0.4, help="fraction of clients to trim for Zeno")
+parser.add_argument('--zeno_kloss', type=float, default=2, help="number of classes for top-k loss")
+parser.add_argument('--zeno_alpha', type=float, default=0, help="alpha for top-k loss for Zeno")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
 parser.add_argument('--random_aggregation', type=int, default=0, help="whether the small groups should be changed each round")
+parser.add_argument('--resample', type=int, default=0, help="whether to resample and average groups before defense")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
 
 parser.add_argument('--batch_print_frequency', type=int, default=100, help="frequency after which batch results need to be printed to the console")
@@ -109,7 +112,7 @@ if obj['data_source'] == 'CIFAR10':
 		transforms.ToTensor(),
 		transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 	])
-	# train_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform), list(range(200)))
+	# train_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform), list(range(5000)))
 	# test_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform), list(range(100)))
 	train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
@@ -137,6 +140,8 @@ elif obj['model'] == 'MLP':
 	global_model = MLP(dim_in=28*28, dim_hidden=200, dim_out=10, seed=obj['seed'])
 elif obj['model'] == 'CNN' and obj['data_source'] == 'MNIST':
 	global_model = CNNMnist(obj['seed'])
+elif obj['model'] == 'CNN' and obj['data_source'] == 'CIFAR10':
+	global_model = CNNCIFAR(obj['seed'])
 elif obj['model'] == 'RESNET18':
 	global_model = models.resnet18(pretrained=False)
 	num_ftrs = global_model.fc.in_features
@@ -196,7 +201,8 @@ np.random.shuffle(client_ordering)
 if obj['is_attack'] == 1:
 	idxs_byz_users = np.random.choice(range(obj['num_users']), max(int(obj['frac_byz_clients']*obj['num_users']), 1), replace=False)
 	num_groups = obj['num_users']//obj['small_group_size']
-	print('Byzantine clusters (0-indexed):', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
+	if not obj['random_aggregation']:
+		print('Byzantine clusters (0-indexed):', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
 
 lr_constant = obj['local_lr'] * obj['global_lr']
 
@@ -282,15 +288,39 @@ for epoch in range(obj['global_epochs']):
 
 		local_byz_updates = None
 	#################################### Aggregation into small CLUSTERS ####################################
-	numb_groups=len(local_updates)/obj['small_group_size']
+	numb_groups=len(local_updates)//obj['small_group_size']
 	m_user=obj['small_group_size']
 	# print('m_user is',m_user)
-	if obj['random_aggregation'] or obj['frac_clients'] < 1:
+	if obj['resample'] and obj['random_aggregation']:
 		array_range = np.arange(len(local_updates))
 		np.random.shuffle(array_range)
+		new_sample = array_range.copy()
+		np.random.shuffle(new_sample)
+		array_range = np.concatenate((array_range, new_sample))
+
+		byz_clusters = []
+		for i in range(numb_groups):
+			i2 = i + numb_groups
+			for j in list(range(i*m_user, (i+1)*m_user)) + list(range(i2*m_user, (i2+1)*m_user)):
+				if array_range[j] in local_byz_indices:
+					byz_clusters.append(i)
+					break
+		print(f'\nResampled Byzantine clusters: {byz_clusters}')
+	elif obj['random_aggregation'] or obj['frac_clients'] < 1:
+		array_range = np.arange(len(local_updates))
+		np.random.shuffle(array_range)
+
+		byz_clusters = []
+		for i in range(numb_groups):
+			for j in range(i*m_user, (i+1)*m_user):
+				if array_range[j] in local_byz_indices:
+					byz_clusters.append(i)
+					break
+		print(f'\nRandom Byzantine clusters: {byz_clusters}')
 	else:
 		client_idx_to_update_idx = {idx: i for i, idx in enumerate(idxs_users)} # maps from idx in user_groups to idx in local_updates
 		array_range = [client_idx_to_update_idx[i] for i in client_ordering] # gets idxs in local_updates with order determined by idx in user_groups
+
 	#np.random.shuffle(array_range)
 	#print(array_range)
 	local_updates_final=[]
@@ -329,6 +359,15 @@ for epoch in range(obj['global_epochs']):
 	#print(local_sizes_final)
 	#torch.mul(local_updates[i][key], local_sizes[i]/total_size
 
+	if obj['resample']:
+		new_updates = []
+		for i in range(numb_groups):
+			update1, update2 = local_updates_final[i], local_updates_final[i + numb_groups]
+			for k in update1.keys():
+				update1[k] = ((update1[k].detach() + update2[k].detach()) / 2).type(update1[k].dtype)
+			new_updates.append(update1)
+		local_updates_final = new_updates
+		local_sizes_final = local_sizes[:len(local_updates_final)]
 	#################################### Defense BEFORE Aggregation ####################################
 
 	if obj['is_defense'] == 1:
@@ -346,7 +385,9 @@ for epoch in range(obj['global_epochs']):
 													obj['zeno_batch_size'],
 													obj['zeno_rho'],
 													obj['zeno_eps'],
-													obj['zeno_trim'])
+													obj['zeno_trim'],
+													obj['zeno_kloss'],
+													obj['zeno_alpha'])
 
 	################################# Aggregation of the local weights #################################
 

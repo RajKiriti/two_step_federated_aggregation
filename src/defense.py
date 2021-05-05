@@ -17,7 +17,9 @@ def defend_updates(global_model,
 				  zeno_batch_size=128,
 				  zeno_rho=0.0001,
 				  zeno_eps=0.1,
-				  zeno_trim=0.4):
+				  zeno_trim=0.4,
+				  zeno_kloss=2,
+				  zeno_alpha=0):
 	"""
 	Robust Aggregation on top of the local updates. This function destroys the original local_updates to save memory.
 
@@ -175,17 +177,34 @@ def defend_updates(global_model,
 			# compute local loss
 			local_model = copy.deepcopy(global_model)
 			w = local_model.state_dict()
+
 			for key in w.keys():
 				w[key] += update[key].type(w[key].dtype)
 			with torch.no_grad():
 				local_output = local_model(images)
 				local_loss = criterion(local_output, labels)
-			local_model = None
-			w = None
+
+			# compute top k loss
+			n_classes = torch.unique(labels).max().item()
+			per_label_loss = torch.zeros(n_classes)
+			counts = torch.zeros(n_classes, dtype=int)
+			with torch.no_grad():
+				for c in range(n_classes):
+					mask = c == labels
+					counts[c] = mask.sum().item()
+					if counts[c] > 0:
+						per_label_loss[c] = criterion(local_model(images[mask]), labels[mask]) / counts[c]
+					else:
+						per_label_loss[c] = float('inf')
+			losses, indices = per_label_loss.sort()
+			topk_loss = losses[:zeno_kloss].sum()
+			if zeno_alpha > 0.0:
+				print(f'top labels: {indices[:zeno_kloss]} counts: {counts} losses: {per_label_loss}')
+
 			# compute zeno score
-			score = global_loss - local_loss - zeno_rho * param_square + zeno_eps
+			score = (global_loss - local_loss) * (1-zeno_alpha) + (-topk_loss) * zeno_alpha - zeno_rho * param_square + zeno_eps
 			if i >= 0:
-				print(f'terms: {global_loss.item():.5f} {local_loss.item():.5f} {(zeno_rho * param_square).item():.5f} {zeno_eps:.5f}')
+				print(f'terms: {global_loss.item():.5f} {local_loss.item():.5f} {(zeno_rho * param_square).item():.5f} {zeno_eps:.5f} {topk_loss:.5f} ')
 				print(f'score: {score.item():.5f}')
 			if score >= 0.0:
 				updates.append(update)
