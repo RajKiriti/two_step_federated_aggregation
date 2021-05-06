@@ -68,7 +68,8 @@ parser.add_argument('--zeno_kloss', type=float, default=2, help="number of class
 parser.add_argument('--zeno_alpha', type=float, default=0, help="alpha for top-k loss for Zeno")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
 parser.add_argument('--random_aggregation', type=int, default=0, help="whether the small groups should be changed each round")
-parser.add_argument('--resample', type=int, default=0, help="whether to resample and average groups before defense")
+parser.add_argument('--inner-resample', type=int, default=0, help="whether to resample and average groups before robust aggregation")
+parser.add_argument('--fixed_cluster_threshold_acc', type=float, default=1.0, help="stop random aggregation after averaging this acc for the last 5 epochs")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
 
 parser.add_argument('--batch_print_frequency', type=int, default=100, help="frequency after which batch results need to be printed to the console")
@@ -197,6 +198,8 @@ np.random.seed(obj['seed'])
 client_ordering = np.arange(obj['num_users'])
 np.random.shuffle(client_ordering)
 
+random_client_orderings = []
+
 # Picking byzantine users (they would remain constant throughout the training procedure)
 if obj['is_attack'] == 1:
 	idxs_byz_users = np.random.choice(range(obj['num_users']), max(int(obj['frac_byz_clients']*obj['num_users']), 1), replace=False)
@@ -291,12 +294,14 @@ for epoch in range(obj['global_epochs']):
 	numb_groups=len(local_updates)//obj['small_group_size']
 	m_user=obj['small_group_size']
 	# print('m_user is',m_user)
-	if obj['resample'] and obj['random_aggregation']:
+	if obj['inner-resample'] and obj['random_aggregation']:
 		array_range = np.arange(len(local_updates))
 		np.random.shuffle(array_range)
 		new_sample = array_range.copy()
 		np.random.shuffle(new_sample)
 		array_range = np.concatenate((array_range, new_sample))
+
+		random_client_orderings.append(array_range)
 
 		byz_clusters = []
 		for i in range(numb_groups):
@@ -309,6 +314,8 @@ for epoch in range(obj['global_epochs']):
 	elif obj['random_aggregation'] or obj['frac_clients'] < 1:
 		array_range = np.arange(len(local_updates))
 		np.random.shuffle(array_range)
+
+		random_client_orderings.append(array_range)
 
 		byz_clusters = []
 		for i in range(numb_groups):
@@ -359,7 +366,7 @@ for epoch in range(obj['global_epochs']):
 	#print(local_sizes_final)
 	#torch.mul(local_updates[i][key], local_sizes[i]/total_size
 
-	if obj['resample']:
+	if obj['inner-resample']:
 		new_updates = []
 		for i in range(numb_groups):
 			update1, update2 = local_updates_final[i], local_updates_final[i + numb_groups]
@@ -530,3 +537,11 @@ for epoch in range(obj['global_epochs']):
 	if test_accuracy[-1] >= obj['threshold_test_metric']:
 		print("Terminating as desired threshold for test metric reached...")
 		break
+
+	if obj['random_aggregation'] and len(test_accuracy) > 10 and sum(test_accuracy[-10:]) / 10 >= obj['fixed_cluster_threshold_acc']:
+		obj['random_aggregation'] = 0
+		_, client_ordering = max(enumerate(random_client_orderings), key=lambda x: test_accuracy[x[0]])
+		print()
+		print(f'{obj["fixed_cluster_threshold_acc"]} test acc reached, setting fixed clusters')
+		print('Byzantine clusters:', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
+		print()
