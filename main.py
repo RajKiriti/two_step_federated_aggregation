@@ -302,14 +302,15 @@ for epoch in range(obj['global_epochs']):
 			cluster_assignments.append(new_sample)
 		array_range = np.concatenate(cluster_assignments)
 
-		byz_clusters = []
-		for i in range(numb_groups):
-			i2 = i + numb_groups
-			for j in list(range(i*m_user, (i+1)*m_user)) + list(range(i2*m_user, (i2+1)*m_user)):
-				if array_range[j] in local_byz_indices:
-					byz_clusters.append(i)
-					break
-		print(f'\nResampled Byzantine clusters: {byz_clusters}')
+		if obj['is_attack'] == 1:
+			byz_clusters = []
+			for i in range(numb_groups):
+				i2 = i + numb_groups
+				for j in list(range(i*m_user, (i+1)*m_user)) + list(range(i2*m_user, (i2+1)*m_user)):
+					if array_range[j] in local_byz_indices:
+						byz_clusters.append(i)
+						break
+			print(f'\nResampled Byzantine clusters: {byz_clusters}')
 
 	elif obj['clustering_method'] == 'outer_resample':
 		cluster_assignments = []
@@ -324,13 +325,14 @@ for epoch in range(obj['global_epochs']):
 		np.random.shuffle(array_range)
 		random_client_orderings.append(array_range)
 
-		byz_clusters = []
-		for i in range(numb_groups):
-			for j in range(i*m_user, (i+1)*m_user):
-				if array_range[j] in local_byz_indices:
-					byz_clusters.append(i)
-					break
-		print(f'\nRandom Byzantine clusters: {byz_clusters}')
+		if obj['is_attack'] == 1:
+			byz_clusters = []
+			for i in range(numb_groups):
+				for j in range(i*m_user, (i+1)*m_user):
+					if array_range[j] in local_byz_indices:
+						byz_clusters.append(i)
+						break
+			print(f'\nRandom Byzantine clusters: {byz_clusters}')
 
 	elif obj['clustering_method'] == 'fixed':
 		client_idx_to_update_idx = {idx: i for i, idx in enumerate(idxs_users)} # maps from idx in user_groups to idx in local_updates
