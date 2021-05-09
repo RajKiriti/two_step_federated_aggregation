@@ -1,5 +1,5 @@
 {
-    "exp_name": "cifar10-iid-CNN-0.3-fall-zeno-outer-resample",
+    "exp_name": "cifar10-iid-CNN-0.3-fall-zeno",
     "seed": 0,
     "data_source": "CIFAR10",
     "sampling": "iid",
@@ -41,7 +41,7 @@
     "zeno_kloss": 2,
     "zeno_alpha": 0,
     "client_pruning": "NA",
-    "clustering_method": "outer_resample",
+    "clustering_method": "fixed",
     "num_cluster_assignments": 10,
     "fixed_cluster_threshold_acc": 1.0,
     "small_group_size": 5,

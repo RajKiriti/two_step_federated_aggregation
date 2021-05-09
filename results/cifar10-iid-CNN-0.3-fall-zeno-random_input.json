@@ -36,7 +36,7 @@
     "zeno_valid_frac": 0.05,
     "zeno_batch_size": 128,
     "zeno_rho": 0.0001,
-    "zeno_eps": 0.05,
+    "zeno_eps": 0.2,
     "zeno_trim": 0.4,
     "zeno_kloss": 2,
     "zeno_alpha": 0,
