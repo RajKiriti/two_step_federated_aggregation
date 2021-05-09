@@ -67,9 +67,9 @@ parser.add_argument('--zeno_trim', type=float, default=0.4, help="fraction of cl
 parser.add_argument('--zeno_kloss', type=float, default=2, help="number of classes for top-k loss")
 parser.add_argument('--zeno_alpha', type=float, default=0, help="alpha for top-k loss for Zeno")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
-parser.add_argument('--random_aggregation', type=int, default=0, help="whether the small groups should be changed each round")
-parser.add_argument('--inner-resample', type=int, default=0, help="whether to resample and average groups before robust aggregation")
-parser.add_argument('--fixed_cluster_threshold_acc', type=float, default=1.0, help="stop random aggregation after averaging this acc for the last 5 epochs")
+parser.add_argument('--clustering_method', type=str, default='median', help="clustering method to be used", choices=['fixed', 'random', 'inner_resample', 'outer_resample'])
+parser.add_argument('--num_cluster_assignments', type=int, default=10, help="number of cluster assignments for inner_resample and outer_resample")
+parser.add_argument('--fixed_cluster_threshold_acc', type=float, default=1.0, help="stop random clustering after averaging this acc for the last 5 epochs")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
 
 parser.add_argument('--batch_print_frequency', type=int, default=100, help="frequency after which batch results need to be printed to the console")
@@ -204,7 +204,7 @@ random_client_orderings = []
 if obj['is_attack'] == 1:
 	idxs_byz_users = np.random.choice(range(obj['num_users']), max(int(obj['frac_byz_clients']*obj['num_users']), 1), replace=False)
 	num_groups = obj['num_users']//obj['small_group_size']
-	if not obj['random_aggregation']:
+	if obj['clustering_method'] == 'fixed':
 		print('Byzantine clusters (0-indexed):', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
 
 lr_constant = obj['local_lr'] * obj['global_lr']
@@ -294,14 +294,13 @@ for epoch in range(obj['global_epochs']):
 	numb_groups=len(local_updates)//obj['small_group_size']
 	m_user=obj['small_group_size']
 	# print('m_user is',m_user)
-	if obj['inner-resample'] and obj['random_aggregation']:
-		array_range = np.arange(len(local_updates))
-		np.random.shuffle(array_range)
-		new_sample = array_range.copy()
-		np.random.shuffle(new_sample)
-		array_range = np.concatenate((array_range, new_sample))
-
-		random_client_orderings.append(array_range)
+	if obj['clustering_method'] == 'inner_resample':
+		cluster_assignments = []
+		for i in range(obj['num_cluster_assignments']):
+			new_sample = np.arange(len(local_updates))
+			np.random.shuffle(new_sample)
+			cluster_assignments.append(new_sample)
+		array_range = np.concatenate(cluster_assignments)
 
 		byz_clusters = []
 		for i in range(numb_groups):
@@ -311,10 +310,18 @@ for epoch in range(obj['global_epochs']):
 					byz_clusters.append(i)
 					break
 		print(f'\nResampled Byzantine clusters: {byz_clusters}')
-	elif obj['random_aggregation'] or obj['frac_clients'] < 1:
+
+	elif obj['clustering_method'] == 'outer_resample':
+		cluster_assignments = []
+		for i in range(obj['num_cluster_assignments']):
+			new_sample = np.arange(len(local_updates))
+			np.random.shuffle(new_sample)
+			cluster_assignments.append(new_sample)
+		array_range = np.concatenate(cluster_assignments)
+
+	elif obj['clustering_method'] == 'random' or obj['frac_clients'] < 1:
 		array_range = np.arange(len(local_updates))
 		np.random.shuffle(array_range)
-
 		random_client_orderings.append(array_range)
 
 		byz_clusters = []
@@ -324,12 +331,13 @@ for epoch in range(obj['global_epochs']):
 					byz_clusters.append(i)
 					break
 		print(f'\nRandom Byzantine clusters: {byz_clusters}')
-	else:
+
+	elif obj['clustering_method'] == 'fixed':
 		client_idx_to_update_idx = {idx: i for i, idx in enumerate(idxs_users)} # maps from idx in user_groups to idx in local_updates
 		array_range = [client_idx_to_update_idx[i] for i in client_ordering] # gets idxs in local_updates with order determined by idx in user_groups
+	else:
+		raise ValueError('Invalid clustering method')
 
-	#np.random.shuffle(array_range)
-	#print(array_range)
 	local_updates_final=[]
 	local_sizes_final=[]
 	local_updates_group = OrderedDict()
@@ -366,7 +374,7 @@ for epoch in range(obj['global_epochs']):
 	#print(local_sizes_final)
 	#torch.mul(local_updates[i][key], local_sizes[i]/total_size
 
-	if obj['inner-resample']:
+	if obj['clustering_method'] == 'inner_resample':
 		new_updates = []
 		for i in range(numb_groups):
 			update1, update2 = local_updates_final[i], local_updates_final[i + numb_groups]
@@ -380,21 +388,42 @@ for epoch in range(obj['global_epochs']):
 	if obj['is_defense'] == 1:
 		local_updates = None
 		global_model.train()
-		local_updates, local_sizes = defend_updates(global_model,
-													local_updates_final,
-													local_sizes_final,
-													obj['device'],
-													obj['local_lr'],
-													obj['defense_type'],
-													obj['trim_ratio'],
-													obj['multi_krum'],
-													zeno_val_dataset,
-													obj['zeno_batch_size'],
-													obj['zeno_rho'],
-													obj['zeno_eps'],
-													obj['zeno_trim'],
-													obj['zeno_kloss'],
-													obj['zeno_alpha'])
+		if obj['clustering_method'] == 'outer_resample':
+			local_updates, local_sizes = [], []
+			for i in range(obj['num_cluster_assignments']):
+				curr_local_updates, curr_local_sizes = defend_updates(global_model,
+															local_updates_final[i*numb_groups : (i+1)*numb_groups],
+															local_sizes_final[i*numb_groups : (i+1)*numb_groups],
+															obj['device'],
+															obj['local_lr'],
+															obj['defense_type'],
+															obj['trim_ratio'],
+															obj['multi_krum'],
+															zeno_val_dataset,
+															obj['zeno_batch_size'],
+															obj['zeno_rho'],
+															obj['zeno_eps'],
+															obj['zeno_trim'],
+															obj['zeno_kloss'],
+															obj['zeno_alpha'])
+				local_updates.extend(curr_local_updates)
+				local_sizes.extend(curr_local_sizes)
+		else:
+			local_updates, local_sizes = defend_updates(global_model,
+														local_updates_final,
+														local_sizes_final,
+														obj['device'],
+														obj['local_lr'],
+														obj['defense_type'],
+														obj['trim_ratio'],
+														obj['multi_krum'],
+														zeno_val_dataset,
+														obj['zeno_batch_size'],
+														obj['zeno_rho'],
+														obj['zeno_eps'],
+														obj['zeno_trim'],
+														obj['zeno_kloss'],
+														obj['zeno_alpha'])
 
 	################################# Aggregation of the local weights #################################
 
@@ -538,8 +567,8 @@ for epoch in range(obj['global_epochs']):
 		print("Terminating as desired threshold for test metric reached...")
 		break
 
-	if obj['random_aggregation'] and len(test_accuracy) > 10 and sum(test_accuracy[-10:]) / 10 >= obj['fixed_cluster_threshold_acc']:
-		obj['random_aggregation'] = 0
+	if obj['clustering_method'] == 'random' and len(test_accuracy) > 10 and sum(test_accuracy[-10:]) / 10 >= obj['fixed_cluster_threshold_acc']:
+		obj['clustering_method'] = 'fixed'
 		_, client_ordering = max(enumerate(random_client_orderings), key=lambda x: test_accuracy[x[0]])
 		print()
 		print(f'{obj["fixed_cluster_threshold_acc"]} test acc reached, setting fixed clusters')
