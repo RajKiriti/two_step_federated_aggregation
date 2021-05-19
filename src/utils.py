@@ -190,6 +190,7 @@ def balanced_train_test_split(indices, labels, test_size, seed):
 	pick = np.array(pick)
 	if sum([1 for c in counts.values() if c < num_each]):
 		print('Unbalanced test set; test_size is too large')
+		print('Test set counts:', counts)
 	# print(np.unique(labels[pick], return_counts=True))
 	train_set = np.delete(indices, pick)
 	test_set = indices[pick]

@@ -136,5 +136,42 @@ class CNNCIFAR(nn.Module):
 		x = x.view(-1, 8*8*64)
 		x = F.relu(self.fc1(x))
 		x = self.fc2(x)
-		
 		return x
+
+
+class RNN(nn.Module):
+
+	"""
+	RNN for Shakespeare next-char prediction as used in (http://proceedings.mlr.press/v54/mcmahan17a/mcmahan17a.pdf), adapted for LEAF Shakespeare dataset.
+
+	Implented by following TF code (https://github.com/google-research/federated/blob/bfe0389ade16462f070d4e01edf7463e268a3faf/utils/models/shakespeare_models.py)
+	"""
+	def __init__(self, seed):
+		"""
+		Args:
+			seed (int) : Random seed value
+		"""
+		
+		super(RNN, self).__init__()
+		
+		torch.manual_seed(seed)
+		
+		self.embedding = nn.Embedding(80, 8)
+		torch.nn.init.uniform_(self.embedding.weight, a=-0.05, b=0.05)
+		self.lstm = nn.LSTM(input_size=8, hidden_size=256, num_layers=2, batch_first=True)
+
+		for i in range(2):
+			nn.init.kaiming_normal_(getattr(self.lstm, f'weight_ih_l{i}'))
+			nn.init.orthogonal_(getattr(self.lstm, f'weight_hh_l{i}'))
+
+			nn.init.zeros_(getattr(self.lstm, f'bias_ih_l{i}'))
+			nn.init.zeros_(getattr(self.lstm, f'bias_hh_l{i}'))
+
+		self.dense = nn.Linear(256, 80)
+
+	def forward(self, x): # input: (batch, seq_len, vocab_size), output: (batch, vocab_size) where vocab_size=80
+
+		embedding = self.embedding(x)
+		output, _ = self.lstm(embedding)
+		output = self.dense(output)
+		return output[:,-1,:].view(-1, 80)

@@ -9,8 +9,9 @@ from torchvision import datasets, transforms, models
 from sklearn.model_selection import train_test_split
 
 from src.sampling import iid, non_iid
-from src.models import LR, MLP, CNNMnist, CNNCIFAR
+from src.models import LR, MLP, CNNMnist, CNNCIFAR, RNN
 from src.utils import global_aggregate, network_parameters, test_inference, balanced_train_test_split
+from src.leaf_utils import ShakespeareDataset
 from src.local_train import LocalUpdate
 from src.attacks import attack_updates
 from src.defense import defend_updates
@@ -90,18 +91,16 @@ np.random.seed(obj['seed'])
 torch.manual_seed(obj['seed'])
 
 ############################### Loading Dataset ###############################
+data_dir = '../data/'
 if obj['data_source'] == 'MNIST':
-	data_dir = '../data/'
 	transformation = transforms.Compose([
 		transforms.ToTensor(), 
 		transforms.Normalize((0.1307,), (0.3081,))
 	])
 	train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transformation)
 	test_dataset = datasets.MNIST(data_dir, train=False, download=True, transform=transformation)
-	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
 
-if obj['data_source'] == 'CIFAR10':
-	data_dir = '../data/'
+elif obj['data_source'] == 'CIFAR10':
 	train_transform = transforms.Compose([
 		# transforms.RandomCrop(24),
 		# transforms.RandomHorizontalFlip(),
@@ -117,7 +116,16 @@ if obj['data_source'] == 'CIFAR10':
 	# test_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform), list(range(100)))
 	train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
-	print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
+
+elif obj['data_source'] == 'shakespeare':
+	train_dataset = ShakespeareDataset(data_dir, obj['num_users'], train=True)
+	test_dataset = ShakespeareDataset(data_dir, obj['num_users'], train=False)
+	shakespeare_user_groups = train_dataset.user_groups()
+	print(len(train_dataset.clients))
+
+else:
+	raise ValueError('Invalid data source.')
+print("Train and Test Sizes for %s - (%d, %d)"%(obj['data_source'], len(train_dataset), len(test_dataset)))
 ################################ Sampling Data ################################
 if obj['is_defense'] and 'zeno' in obj['defense_type']:
 	labels = train_dataset.targets
@@ -129,10 +137,18 @@ if obj['is_defense'] and 'zeno' in obj['defense_type']:
 	np.random.seed(obj['seed'])
 else:
 	zeno_val_dataset = None
-if obj['sampling'] == 'iid':
-	user_groups = iid(train_dataset, obj['num_users'], obj['seed'])
+
+if obj['data_source'] == 'shakespeare':
+	if zeno_val_dataset:
+		old_to_zeno_idx = {old_idx: new_idx for new_idx, old_idx in enumerate(train_idx)}
+		user_groups = [[old_to_zeno_idx[i] for i in g if i in old_to_zeno_idx] for g in shakespeare_user_groups]
+	else:
+		user_groups = shakespeare_user_groups
 else:
-	user_groups = non_iid(train_dataset, obj['num_users'], obj['num_shards_user'], obj['seed'])
+	if obj['sampling'] == 'iid':
+		user_groups = iid(train_dataset, obj['num_users'], obj['seed'])
+	else:
+		user_groups = non_iid(train_dataset, obj['num_users'], obj['num_shards_user'], obj['seed'])
 
 ################################ Defining Model ################################
 if obj['model'] == 'LR':
@@ -151,6 +167,8 @@ elif obj['model'] == 'RESNET18GN':
 	global_model = models.resnet18(pretrained=False, norm_layer=lambda C: torch.nn.GroupNorm(32, C, eps=0.001))
 	num_ftrs = global_model.fc.in_features
 	global_model.fc = torch.nn.Linear(num_ftrs, 10)
+elif obj['model'] == 'RNN':
+	global_model = RNN(obj['seed'])
 else:
 	raise ValueError('Check the model and data source provided in the arguments.')
 
@@ -391,7 +409,7 @@ for epoch in range(obj['global_epochs']):
 		local_updates = None
 		global_model.train()
 		if obj['clustering_method'] == 'outer_resample':
-			local_updates, local_sizes = [], []
+			resampled_local_updates, resampled_local_sizes = [], []
 			for i in range(obj['num_cluster_assignments']):
 				curr_local_updates, curr_local_sizes = defend_updates(global_model,
 															local_updates_final[i*numb_groups : (i+1)*numb_groups],
@@ -408,8 +426,8 @@ for epoch in range(obj['global_epochs']):
 															obj['zeno_trim'],
 															obj['zeno_kloss'],
 															obj['zeno_alpha'])
-				local_updates.extend(curr_local_updates)
-				local_sizes.extend(curr_local_sizes)
+				resampled_local_updates.append(curr_local_updates)
+				resampled_local_sizes.append(curr_local_sizes)
 		else:
 			local_updates, local_sizes = defend_updates(global_model,
 														local_updates_final,
@@ -512,11 +530,26 @@ for epoch in range(obj['global_epochs']):
 	global_model.load_state_dict(gw)
 	gw = None
 
-	if len(local_updates) != 0:	# Take a global step only if there exists atleast one local update
-		global_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, local_updates, 
-											local_sizes, global_lr, obj['beta1'], obj['beta2'],
-											v, m, obj['eps'], epoch+1)
+	if obj['clustering_method'] == 'outer_resample':
+		resample_updates, resample_sizes = [], []
+		for i in range(obj['num_cluster_assignments']):
+			resample_round_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, resampled_local_updates[i], 
+												resampled_local_sizes[i], global_lr, obj['beta1'], obj['beta2'],
+												v, m, obj['eps'], epoch+1)
+			for k in resample_round_weights.keys():
+				resample_round_weights[k] -= global_weights[k]
+			resample_updates.append(resample_round_weights)
+			resample_sizes.append(1)
+		global_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, resample_updates, 
+												resample_sizes, global_lr, obj['beta1'], obj['beta2'],
+												v, m, obj['eps'], epoch+1)
 		global_model.load_state_dict(global_weights)
+	else:
+		if len(local_updates) != 0:	# Take a global step only if there exists atleast one local update
+			global_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, local_updates, 
+												local_sizes, global_lr, obj['beta1'], obj['beta2'],
+												v, m, obj['eps'], epoch+1)
+			global_model.load_state_dict(global_weights)
 
 	if obj['local_optimizer'] == 'scaffold': # Need to update the server control variate
 		for key in c[-1].keys():
