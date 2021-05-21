@@ -1,3 +1,4 @@
+import time
 import numpy as np
 import pandas as pd
 import copy
@@ -11,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from src.sampling import iid, non_iid
 from src.models import LR, MLP, CNNMnist, CNNCIFAR, RNN
 from src.utils import global_aggregate, network_parameters, test_inference, balanced_train_test_split
-from src.leaf_utils import ShakespeareDataset
+from src.leaf_utils import ShakespeareDataset, NUM_LETTERS
 from src.local_train import LocalUpdate
 from src.attacks import attack_updates
 from src.defense import defend_updates
@@ -20,6 +21,8 @@ from collections import OrderedDict, Counter, defaultdict
 
 import warnings
 warnings.filterwarnings("ignore")
+
+start = time.time()
 
 ############################## Reading Arguments ##############################
 
@@ -99,6 +102,7 @@ if obj['data_source'] == 'MNIST':
 	])
 	train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transformation)
 	test_dataset = datasets.MNIST(data_dir, train=False, download=True, transform=transformation)
+	num_classes = 10
 
 elif obj['data_source'] == 'CIFAR10':
 	train_transform = transforms.Compose([
@@ -116,10 +120,12 @@ elif obj['data_source'] == 'CIFAR10':
 	# test_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform), list(range(100)))
 	train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
+	num_classes = 10
 
 elif obj['data_source'] == 'shakespeare':
 	train_dataset = ShakespeareDataset(data_dir, obj['num_users'], train=True)
 	test_dataset = ShakespeareDataset(data_dir, obj['num_users'], train=False)
+	num_classes = NUM_LETTERS
 	shakespeare_user_groups = train_dataset.user_groups()
 	print(len(train_dataset.clients))
 
@@ -209,8 +215,6 @@ test_accuracy = []
 mus = [obj['mu'] for i in range(obj['num_users'])]
 local_lrs = [obj['local_lr'] for i in range(obj['num_users'])]
 local_lr_counts = [1 for i in range(obj['num_users'])]
-
-num_classes = 10 # MNIST
 
 np.random.seed(obj['seed'])
 client_ordering = np.arange(obj['num_users'])
@@ -609,3 +613,7 @@ for epoch in range(obj['global_epochs']):
 		print(f'{obj["fixed_cluster_threshold_acc"]} test acc reached, setting fixed clusters')
 		print('Byzantine clusters:', [i for i in range(num_groups) if set(client_ordering[i*obj['small_group_size']:(i+1) * obj['small_group_size']]) & set(idxs_byz_users)])
 		print()
+
+end = time.time()
+
+print(f'Finished in {end - start} seconds')
