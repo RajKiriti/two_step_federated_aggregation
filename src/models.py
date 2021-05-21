@@ -72,7 +72,7 @@ class CNNMnist(nn.Module):
 	2-layer CNN as used in (http://proceedings.mlr.press/v54/mcmahan17a/mcmahan17a.pdf).
 		
 	Note: TF code doesn't use dropout. 
-	(https://github.com/tensorflow/federated/blob/master/tensorflow_federated/python/research/simple_fedavg/emnist_fedavg_main.py#L82)
+	(https://github.com/tensorflow/federated/blob/master/tensorflow_federated/python/research/simple_fedavg/emnist_fedavg_main.py#L82, Apache-2.0 License)
 	"""
 	
 	def __init__(self, seed):
@@ -109,7 +109,7 @@ class CNNCIFAR(nn.Module):
 	2-layer CNN as used in (http://proceedings.mlr.press/v54/mcmahan17a/mcmahan17a.pdf).
 		
 	Note: TF code doesn't use dropout. 
-	(https://github.com/tensorflow/federated/blob/master/tensorflow_federated/python/research/simple_fedavg/emnist_fedavg_main.py#L82)
+	(https://github.com/tensorflow/federated/blob/master/tensorflow_federated/python/research/simple_fedavg/emnist_fedavg_main.py#L82, Apache-2.0 License)
 	"""
 	
 	def __init__(self, seed):
@@ -144,7 +144,7 @@ class RNN(nn.Module):
 	"""
 	RNN for Shakespeare next-char prediction as used in (http://proceedings.mlr.press/v54/mcmahan17a/mcmahan17a.pdf), adapted for LEAF Shakespeare dataset.
 
-	Implented by following TF code (https://github.com/google-research/federated/blob/bfe0389ade16462f070d4e01edf7463e268a3faf/utils/models/shakespeare_models.py)
+	Implented by following TF code (https://github.com/google-research/federated/blob/bfe0389ade16462f070d4e01edf7463e268a3faf/utils/models/shakespeare_models.py, Apache-2.0 License)
 	"""
 	def __init__(self, seed):
 		"""

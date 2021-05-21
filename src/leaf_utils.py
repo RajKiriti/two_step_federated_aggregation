@@ -28,7 +28,7 @@ class ShakespeareDataset(Dataset):
             x, y = client['x'], client['y']
             self.user_ranges.append(list(range(start_idx, start_idx + len(x))))
             start_idx += len(x)
-            self.data.extend(list(zip(x, y)))
+            self.data.extend([self._format_data(xi, yi) for xi, yi in zip(x, y)])
             self.targets.extend([ALL_LETTERS.find(yi) for yi in y])
 
     def __len__(self):
@@ -37,7 +37,7 @@ class ShakespeareDataset(Dataset):
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.item()
-        return self._format_data(*self.data[idx])
+        return self.data[idx]
 
     def _format_data(self, xi, yi):
         new_xi = torch.tensor([ALL_LETTERS.find(c) for c in xi])
@@ -47,7 +47,7 @@ class ShakespeareDataset(Dataset):
     def user_groups(self):
         return self.user_ranges
 
-# Code from LEAF utils 
+""" Code taken from LEAF utils (https://github.com/TalwalkarLab/leaf/tree/master/models/utils, BSD-2-Clause License) """
 
 def read_dir(data_dir):
     clients = []
