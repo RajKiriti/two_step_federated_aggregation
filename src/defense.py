@@ -86,8 +86,9 @@ def defend_updates(global_model,
 		
 		remove = int(trim_ratio * len(local_updates))
 
-		dist = torch.zeros(len(local_updates), len(local_updates))
-		d = torch.zeros(len(local_updates))
+		updates_device = next(iter(local_updates[0].values())).device
+		dist = torch.zeros(len(local_updates), len(local_updates), device=updates_device)
+		d = torch.zeros(len(local_updates), device=updates_device)
 
 		for i in range(len(local_updates)):
 			for j in range(len(local_updates)):
