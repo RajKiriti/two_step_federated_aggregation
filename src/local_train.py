@@ -12,7 +12,7 @@ class LocalUpdate(object):
 	
 	def __init__(self, dataset, idxs, device, train_test_split=0.8,
 				train_batch_size=32, test_batch_size=32, attack=None,
-				num_classes=None):
+				num_classes=None, flip_eps=None):
 		"""
 		Args:
 			dataset (tensor) : Global data
@@ -31,6 +31,7 @@ class LocalUpdate(object):
 		self.test_batch_size = test_batch_size
 		self.attack = attack
 		self.num_classes = num_classes
+		self.flip_eps = flip_eps
 		# self.criterion = nn.NLLLoss().to(self.device) # Default criterion set to NLL loss function
 		self.criterion = nn.CrossEntropyLoss().to(self.device)
 
@@ -123,7 +124,10 @@ class LocalUpdate(object):
 		# Finding the local update in parameters
 		local_changes = OrderedDict()
 		for k in global_model.state_dict():
-			local_changes[k] = local_model.state_dict()[k] - global_model.state_dict()[k]
+			if self.attack == 'sign_flip':
+				local_changes[k] = self.flip_eps * (local_model.state_dict()[k] - global_model.state_dict()[k])
+			else:
+				local_changes[k] = local_model.state_dict()[k] - global_model.state_dict()[k]
 
 		# Updating local client variates
 		control_changes = OrderedDict()

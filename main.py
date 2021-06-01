@@ -56,7 +56,8 @@ parser.add_argument('--local_lr_decay', type=str, default='NA', help="whether to
 parser.add_argument('--global_lr_ascent', type=int, default=0, help="whether to ascend the global learning rate")
 parser.add_argument('--frac_byz_clients', type=float, default=0.0, help="proportion of clients that are picked in a round")
 parser.add_argument('--is_attack', type=int, default=0, help="whether to attack or not")
-parser.add_argument('--attack_type', type=str, default='label_flip', help="attack to be used", choices=['fall', 'label_flip', 'little', 'gaussian'])
+parser.add_argument('--attack_type', type=str, default='label_flip', help="attack to be used", choices=['fall', 'label_flip', 'sign_flip', 'little', 'gaussian'])
+parser.add_argument('--flip_eps', type=float, default=-1.0, help="multiplier to be used for the Sign-flip Attack")
 parser.add_argument('--fall_eps', type=float, default=-5.0, help="epsilon value to be used for the Fall Attack")
 parser.add_argument('--little_std', type=float, default=1.5, help="standard deviation to be used for the Little Attack")
 parser.add_argument('--is_defense', type=int, default=0, help="whether to defend or not")
@@ -216,6 +217,8 @@ mus = [obj['mu'] for i in range(obj['num_users'])]
 local_lrs = [obj['local_lr'] for i in range(obj['num_users'])]
 local_lr_counts = [1 for i in range(obj['num_users'])]
 
+per_client_attacks = ['label_flip', 'sign_flip']
+
 np.random.seed(obj['seed'])
 client_ordering = np.arange(obj['num_users'])
 np.random.shuffle(client_ordering)
@@ -250,9 +253,9 @@ for epoch in range(obj['global_epochs']):
 
 	for idx in idxs_users: # Training the local models
 
-		if obj['is_attack'] == 1 and obj['attack_type'] == 'label_flip' and idx in idxs_byz_users:
+		if obj['is_attack'] == 1 and obj['attack_type'] in per_client_attacks and idx in idxs_byz_users:
 			local_model = LocalUpdate(train_dataset, user_groups[idx], obj['device'], 
-					obj['train_test_split'], obj['train_batch_size'], obj['test_batch_size'], obj['attack_type'], num_classes)
+					obj['train_test_split'], obj['train_batch_size'], obj['test_batch_size'], obj['attack_type'], num_classes, obj['flip_eps'])
 		else:
 			local_model = LocalUpdate(train_dataset, user_groups[idx], obj['device'], 
 					obj['train_test_split'], obj['train_batch_size'], obj['test_batch_size'])
@@ -305,7 +308,7 @@ for epoch in range(obj['global_epochs']):
 						local_byz_updates[i][k] = torch.normal(m[k], s[k]).to(obj['device'])
 					local_updates[idx] = copy.deepcopy(local_byz_updates[i])
 
-			elif obj['attack_type'] == 'label_flip':
+			elif obj['attack_type'] in per_client_attacks:
 				pass # Setting same update for all byzantine workers
 
 			else:
