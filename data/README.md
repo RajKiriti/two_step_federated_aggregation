@@ -1,0 +1,1 @@
+Place the shakespeare dataset in this directory. Image datasets will also be downloaded here.
