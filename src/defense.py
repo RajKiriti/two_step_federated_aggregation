@@ -117,6 +117,7 @@ def defend_updates(global_model,
 			if score >= 0.0:
 				updates.append(update)
 				updates_sizes.append(local_sizes[i])
+	return updates, updates_sizes
 
 def create_local_model(global_model, update):
 	local_model = copy.deepcopy(global_model)

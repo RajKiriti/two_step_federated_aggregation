@@ -30,24 +30,24 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument('--exp_name', type=str, default='', help="name of the experiment")
 parser.add_argument('--seed', type=int, default=0, help="seed for running the experiments")
-parser.add_argument('--data_source', type=str, default="MNIST", help="dataset to be used", choices=['MNIST'])
+parser.add_argument('--data_source', type=str, default="MNIST", help="dataset to be used", choices=['MNIST','CIFAR10','shakespeare'])
 parser.add_argument('--sampling', type=str, default="iid", help="sampling technique for client data", choices=['iid', 'non_iid'])
-parser.add_argument('--num_users', type=int, default=100, help="number of clients to create")
+parser.add_argument('--num_users', type=int, default=60, help="number of clients to create")
 parser.add_argument('--num_shards_user', type=int, default=2, help="number of classes to give to the user")
 parser.add_argument('--train_test_split', type=float, default=1.0, help="train test split at the client end")
 parser.add_argument('--train_batch_size', type=int, default=32, help="batch size for client training")
 parser.add_argument('--test_batch_size', type=int, default=32, help="batch size for testing data")
 
-parser.add_argument('--model', type=str, default="MLP", help="network structure to be used for training", choices=['LR', 'MLP', 'CNN'])
-parser.add_argument('--device', type=str, default="cpu", help="device for Torch", choices=['cpu', 'gpu'])
-parser.add_argument('--frac_clients', type=float, default=0.1, help="proportion of clients to use for local updates")
+parser.add_argument('--model', type=str, default="CNN", help="network structure to be used for training", choices=['LR', 'MLP', 'CNN', 'RESNET18', 'RESNET18GN'])
+parser.add_argument('--device', type=str, default="cpu", help="device for Torch", choices=['cpu', 'cuda:0', 'cuda:1'])
+parser.add_argument('--frac_clients', type=float, default=1.0, help="proportion of clients to use for local updates")
 parser.add_argument('--global_optimizer', type=str, default='fedavg', help="global optimizer to be used", choices=['fedavg', 'fedavgm', 'scaffold', 'fedadam', 'fedyogi'])
 parser.add_argument('--global_epochs', type=int, default=100, help="number of global federated rounds")
 parser.add_argument('--global_lr', type=float, default=1, help="learning rate for global steps")
 parser.add_argument('--local_optimizer', type=str, default='sgd', help="local optimizer to be used", choices=['sgd', 'adam', 'fedprox', 'scaffold', 'fedalm'])
-parser.add_argument('--local_epochs', type=int, default=20, help="number of local client training steps")
-parser.add_argument('--local_lr', type=float, default=1e-4, help="learning rate for local updates")
-parser.add_argument('--momentum', type=float, default=0.5, help="momentum value for SGD")
+parser.add_argument('--local_epochs', type=int, default=2, help="number of local client training steps")
+parser.add_argument('--local_lr', type=float, default=0.01, help="learning rate for local updates")
+parser.add_argument('--momentum', type=float, default=0.9, help="momentum value for SGD")
 parser.add_argument('--mu', type=float, default=0.1, help="proximal coefficient for FedProx")
 parser.add_argument('--beta1', type=float, default=0.9, help="parameter for FedAvgM and FedAdam")
 parser.add_argument('--beta2', type=float, default=0.999, help="parameter for FedAdam")
@@ -58,22 +58,19 @@ parser.add_argument('--frac_byz_clients', type=float, default=0.0, help="proport
 parser.add_argument('--is_attack', type=int, default=0, help="whether to attack or not")
 parser.add_argument('--attack_type', type=str, default='label_flip', help="attack to be used", choices=['fall', 'label_flip', 'sign_flip', 'little', 'gaussian'])
 parser.add_argument('--flip_eps', type=float, default=-1.0, help="multiplier to be used for the Sign-flip Attack")
-parser.add_argument('--fall_eps', type=float, default=-5.0, help="epsilon value to be used for the Fall Attack")
+parser.add_argument('--fall_eps', type=float, default=-10.0, help="epsilon value to be used for the Fall Attack")
 parser.add_argument('--little_std', type=float, default=1.5, help="standard deviation to be used for the Little Attack")
 parser.add_argument('--is_defense', type=int, default=0, help="whether to defend or not")
-parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean', 'zeno++', 'zeno', 'zeno_trimmed'])
-parser.add_argument('--trim_ratio', type=float, default=0.1, help="proportion of updates to trim for trimmed mean")
-parser.add_argument('--multi_krum', type=int, default=5, help="number of clients to pick after krumming")
+parser.add_argument('--defense_type', type=str, default='median', help="aggregation to be used", choices=['median', 'krum', 'trimmed_mean', 'zeno'])
+parser.add_argument('--trim_ratio', type=float, default=0.4, help="proportion of updates to trim for trimmed mean")
+parser.add_argument('--multi_krum', type=int, default=1, help="number of clients to pick after krumming")
 parser.add_argument('--zeno_valid_frac', type=float, default=0.05, help="fraction of the training dataset to be used for Zeno++ validation")
 parser.add_argument('--zeno_batch_size', type=int, default=128, help="batch size for calculating gradient for Zeno++ score")
 parser.add_argument('--zeno_rho', type=float, default=0.0001, help="rho for Zeno++ score")
-parser.add_argument('--zeno_eps', type=float, default=0.1, help="epsilon for Zeno++ score")
-parser.add_argument('--zeno_trim', type=float, default=0.4, help="fraction of clients to trim for Zeno")
-parser.add_argument('--zeno_kloss', type=float, default=2, help="number of classes for top-k loss")
-parser.add_argument('--zeno_alpha', type=float, default=0, help="alpha for top-k loss for Zeno")
+parser.add_argument('--zeno_eps', type=float, default=0.2, help="epsilon for Zeno++ score")
 parser.add_argument('--client_pruning', type=str, default='NA', help="whether to prune clients based on performance", choices=['NA', 'AR', 'HR'])
-parser.add_argument('--clustering_method', type=str, default='median', help="clustering method to be used", choices=['fixed', 'random', 'inner_resample', 'outer_resample'])
-parser.add_argument('--num_cluster_assignments', type=int, default=10, help="number of cluster assignments for inner_resample and outer_resample")
+parser.add_argument('--clustering_method', type=str, default='median', help="clustering method to be used", choices=['fixed', 'random', 'resample'])
+parser.add_argument('--num_cluster_assignments', type=int, default=10, help="number of cluster assignments for resample")
 parser.add_argument('--fixed_cluster_threshold_acc', type=float, default=1.0, help="stop random clustering after averaging this acc for the last 5 epochs")
 parser.add_argument('--small_group_size', type=int, default='1', help="number of clients per each small group")
 
@@ -95,7 +92,7 @@ np.random.seed(obj['seed'])
 torch.manual_seed(obj['seed'])
 
 ############################### Loading Dataset ###############################
-data_dir = '../data/'
+data_dir = './data/'
 if obj['data_source'] == 'MNIST':
 	transformation = transforms.Compose([
 		transforms.ToTensor(), 
@@ -107,18 +104,13 @@ if obj['data_source'] == 'MNIST':
 
 elif obj['data_source'] == 'CIFAR10':
 	train_transform = transforms.Compose([
-		# transforms.RandomCrop(24),
-		# transforms.RandomHorizontalFlip(),
 		transforms.ToTensor(),
 		transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 	])
 	test_transform = transforms.Compose([
-		# transforms.CenterCrop(24),
 		transforms.ToTensor(),
 		transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 	])
-	# train_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform), list(range(5000)))
-	# test_dataset = torch.utils.data.Subset(datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform), list(range(100)))
 	train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
 	test_dataset = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
 	num_classes = 10
@@ -277,7 +269,6 @@ for epoch in range(obj['global_epochs']):
 		local_losses.append(loss)
 		local_sizes.append(local_size)
 		w = None
-		#print(idx, np.unique(np.array([train_dataset.targets.numpy()[i] for i in user_groups[idx]])))
 
 	train_loss_updated.append(sum(local_losses)/len(local_losses)) # Appending global training loss
 
@@ -312,32 +303,14 @@ for epoch in range(obj['global_epochs']):
 				pass # Setting same update for all byzantine workers
 
 			else:
-				raise ValueError("Please specify a valid attack_type from ['fall' ,'little', 'gaussian'].")
+				raise ValueError("Please specify a valid attack_type from ['fall' ,'little', 'gaussian', 'label_flip', 'sign_flip'].")
 
 		local_byz_updates = None
 	#################################### Aggregation into small CLUSTERS ####################################
 	numb_groups=len(local_updates)//obj['small_group_size']
 	m_user=obj['small_group_size']
 	# print('m_user is',m_user)
-	if obj['clustering_method'] == 'inner_resample':
-		cluster_assignments = []
-		for i in range(obj['num_cluster_assignments']):
-			new_sample = np.arange(len(local_updates))
-			np.random.shuffle(new_sample)
-			cluster_assignments.append(new_sample)
-		array_range = np.concatenate(cluster_assignments)
-
-		if obj['is_attack'] == 1:
-			byz_clusters = []
-			for i in range(numb_groups):
-				i2 = i + numb_groups
-				for j in list(range(i*m_user, (i+1)*m_user)) + list(range(i2*m_user, (i2+1)*m_user)):
-					if array_range[j] in local_byz_indices:
-						byz_clusters.append(i)
-						break
-			print(f'\nResampled Byzantine clusters: {byz_clusters}')
-
-	elif obj['clustering_method'] == 'outer_resample':
+	if obj['clustering_method'] == 'resample':
 		cluster_assignments = []
 		for i in range(obj['num_cluster_assignments']):
 			new_sample = np.arange(len(local_updates))
@@ -374,16 +347,13 @@ for epoch in range(obj['global_epochs']):
 		local_updates_group[k] = torch.zeros_like(global_weights[k])
 	j=1
 	for i in array_range:
-		
-		#print(j)
+
 		if j%m_user==0:
-			#print(j)
 			local_sizes_new+=local_sizes[i]
 			for key in global_weights.keys():
 				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i]).type(local_updates_group[key].dtype)
 				local_updates_group[key]=local_updates_group[key]/local_sizes_new
 
-			#local_updates_group=local_updates_group/m_user
 			local_sizes_new=1
 			local_updates_final.append(copy.deepcopy(local_updates_group))
 			local_sizes_final.append(local_sizes_new)
@@ -397,42 +367,26 @@ for epoch in range(obj['global_epochs']):
 				local_updates_group[key]+=torch.mul(local_updates[i][key],local_sizes[i]).type(local_updates_group[key].dtype)
 		j+=1
 	local_updates_group = None
-	#print(len(local_updates_final))
-	#print(local_sizes_final)
-	#torch.mul(local_updates[i][key], local_sizes[i]/total_size
 
-	if obj['clustering_method'] == 'inner_resample':
-		new_updates = []
-		for i in range(numb_groups):
-			update1, update2 = local_updates_final[i], local_updates_final[i + numb_groups]
-			for k in update1.keys():
-				update1[k] = ((update1[k].detach() + update2[k].detach()) / 2).type(update1[k].dtype)
-			new_updates.append(update1)
-		local_updates_final = new_updates
-		local_sizes_final = local_sizes[:len(local_updates_final)]
 	#################################### Defense BEFORE Aggregation ####################################
 
 	if obj['is_defense'] == 1:
 		local_updates = None
 		global_model.train()
-		if obj['clustering_method'] == 'outer_resample':
+		if obj['clustering_method'] == 'resample':
 			resampled_local_updates, resampled_local_sizes = [], []
 			for i in range(obj['num_cluster_assignments']):
 				curr_local_updates, curr_local_sizes = defend_updates(global_model,
 															local_updates_final[i*numb_groups : (i+1)*numb_groups],
 															local_sizes_final[i*numb_groups : (i+1)*numb_groups],
 															obj['device'],
-															obj['local_lr'],
 															obj['defense_type'],
 															obj['trim_ratio'],
 															obj['multi_krum'],
 															zeno_val_dataset,
 															obj['zeno_batch_size'],
 															obj['zeno_rho'],
-															obj['zeno_eps'],
-															obj['zeno_trim'],
-															obj['zeno_kloss'],
-															obj['zeno_alpha'])
+															obj['zeno_eps'])
 				resampled_local_updates.append(curr_local_updates)
 				resampled_local_sizes.append(curr_local_sizes)
 		else:
@@ -440,17 +394,13 @@ for epoch in range(obj['global_epochs']):
 														local_updates_final,
 														local_sizes_final,
 														obj['device'],
-														obj['local_lr'],
 														obj['defense_type'],
 														obj['trim_ratio'],
 														obj['multi_krum'],
 														zeno_val_dataset,
 														obj['zeno_batch_size'],
 														obj['zeno_rho'],
-														obj['zeno_eps'],
-														obj['zeno_trim'],
-														obj['zeno_kloss'],
-														obj['zeno_alpha'])
+														obj['zeno_eps'])
 
 	################################# Aggregation of the local weights #################################
 
@@ -478,13 +428,6 @@ for epoch in range(obj['global_epochs']):
 			more = []
 
 			for idx in range(len(local_updates)):
-				#curr_dist = [torch.norm(local_updates[idx][k]).numpy().reshape(-1, 1)[0][0] for k in gw.keys()]
-				#print(idxs_users[idx], curr_dist)
-
-				#ee = mus[idxs_users[idx]]
-				#mus[idxs_users[idx]] += (obj['mu'])*np.linalg.norm(curr_dist)
-				#print("Mu for the client %d changed from %f to %f."%(idxs_users[idx], ee, mus[idxs_users[idx]]))
-
 				temp_g_weights2, v, m = global_aggregate(obj['global_optimizer'], gw, local_updates[:idx] + local_updates[idx+1:],
 												local_sizes, obj['global_lr'], obj['beta1'], obj['beta2'],
 												v, m, obj['eps'], epoch+1)
@@ -492,10 +435,6 @@ for epoch in range(obj['global_epochs']):
 				global_model.eval()
 				test_acc2, test_loss_value2 = test_inference(global_model, test_dataset, obj['device'], obj['test_batch_size'])
 
-				#msg = '| Client : {0:>4} | Marginal - {1:>6.2f}, Total - {2:>6.2f}, Norm - {3:>6.6f}'
-				#print(msg.format(idxs_users[idx], test_acc2*100.0, test_acc1*100.0, np.mean(curr_dist)))
-
-				#print(idx, test_acc1, test_acc2)
 				if obj['client_pruning'] == 'AR':
 
 					if test_acc1 <= test_acc2:
@@ -513,14 +452,6 @@ for epoch in range(obj['global_epochs']):
 				else:
 					raise ValueError('Specify a valid value for client pruning.')
 
-				# if test_acc2 < test_acc1: # Without is less than with
-				# 	idxs_to_use.append(idx)
-				# else:
-				# 	ee = mus[idxs_users[idx]]
-				# 	mus[idxs_users[idx]] += (obj['mu']*10.0)*(test_acc2 - test_acc1)*100.0
-				# 	print("Mu for the client %d changed from %f to %f."%(idxs_users[idx], ee, mus[idxs_users[idx]]))
-				#print("Marginal with and without client %d - %.2f %% and %.2f %%."%(idxs_users[idx], test_acc1*100.0, test_acc2*100.0))
-
 			if obj['client_pruning'] == 'AR':
 			
 				if len(less) < int(len(local_updates)/2):
@@ -537,7 +468,7 @@ for epoch in range(obj['global_epochs']):
 	global_model.load_state_dict(gw)
 	gw = None
 
-	if obj['clustering_method'] == 'outer_resample':
+	if obj['clustering_method'] == 'resample':
 		resample_updates, resample_sizes = [], []
 		for i in range(obj['num_cluster_assignments']):
 			resample_round_weights, v, m = global_aggregate(obj['global_optimizer'], global_weights, resampled_local_updates[i], 
@@ -603,7 +534,6 @@ for epoch in range(obj['global_epochs']):
 			out_arr = pd.DataFrame(np.array([list(range(epoch+1)), test_accuracy, train_loss_updated, test_loss]).T,
 				columns=['epoch', 'test_acc', 'train_loss_updated', 'test_loss'])
 		out_arr.to_csv('results/%s_output.csv'%(obj['exp_name']), index=False)
-		# torch.save(global_model, 'results/%s_model.pt'%(obj['exp_name']))
 
 	if test_accuracy[-1] >= obj['threshold_test_metric']:
 		print("Terminating as desired threshold for test metric reached...")
